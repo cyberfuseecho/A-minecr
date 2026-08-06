@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Mobile Voxel Multiplayer</title>
+    <style>
+        * { box-sizing: border-box; touch-action: none; -webkit-user-select: none; user-select: none; }
+        body { margin: 0; overflow: hidden; background-color: #87CEEB; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        
+        #crosshair {
+            position: absolute; top: 50%; left: 50%; width: 20px; height: 20px;
+            transform: translate(-50%, -50%); pointer-events: none; z-index: 100;
+        }
+        #crosshair::before, #crosshair::after { content: ''; position: absolute; background: rgba(255, 255, 255, 0.8); }
+        #crosshair::before { top: 9px; left: 0; width: 20px; height: 2px; }
+        #crosshair::after { top: 0; left: 9px; width: 2px; height: 20px; }
+        
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 50; }
+        #top-bar { position: absolute; top: 10px; left: 10px; color: white; text-shadow: 1px 1px 2px #000; font-weight: bold; font-size: 14px; }
+
+        /* Join Modal */
+        #join-modal {
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+            background: rgba(0, 0, 0, 0.7); display: flex; justify-content: center; align-items: center;
+            z-index: 200; pointer-events: auto;
+        }
+        .modal-box {
+            background: #2c3e50; padding: 25px; border-radius: 12px; text-align: center; color: white;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5); width: 85%; max-width: 320px;
+        }
+        .modal-box input {
+            width: 100%; padding: 12px; margin: 15px 0; border: none; border-radius: 6px;
+            font-size: 16px; outline: none; text-align: center; touch-action: auto; -webkit-user-select: auto; user-select: auto;
+        }
+        .modal-box button {
+            width: 100%; padding: 12px; background: #27ae60; color: white; border: none;
+            border-radius: 6px; font-weight: bold; font-size: 16px; cursor: pointer;
+        }
+
+        /* Hotbar UI */
+        #hotbar {
+            position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+            display: flex; gap: 6px; background: rgba(0, 0, 0, 0.5); padding: 6px;
+            border-radius: 8px; pointer-events: auto; z-index: 100;
+        }
+        .slot {
+            width: 38px; height: 38px; border: 2px solid rgba(255, 255, 255, 0.3); border-radius: 6px;
+            transition: transform 0.1s; display: flex; align-items: center; justify-content: center;
+            color: white; font-size: 10px; font-weight: bold; text-shadow: 1px 1px 1px #000;
+        }
+        .slot.active { border-color: #fff; transform: scale(1.15); box-shadow: 0 0 10px rgba(255,255,255,0.8); }
+        #slot-1 { background: #55aa55; } /* Grass */
+        #slot-2 { background: #8b4513; } /* Dirt */
+        #slot-3 { background: #777777; } /* Stone */
+        #slot-4 { background: #a0522d; } /* Wood */
+        #slot-5 { background: #2e8b57; } /* Leaves */
+        #slot-6 { background: #b22222; } /* Brick */
+
+        /* Controls */
+        .controls-container {
+            display: flex; justify-content: space-between; padding: 20px; align-items: flex-end;
+            position: absolute; bottom: 0; width: 100%; box-sizing: border-box; pointer-events: none;
+        }
+        .btn {
+            background: rgba(0, 0, 0, 0.4); border: 2px solid white; border-radius: 50%;
+            width: 60px; height: 60px; display: flex; justify-content: center; align-items: center;
+            color: white; font-weight: bold; font-size: 11px; pointer-events: auto; text-transform: uppercase;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+        .btn:active { background: rgba(255, 255, 255, 0.5); }
+        .action-group { display: flex; gap: 12px; pointer-events: none; }
+        
+        #joystick-base {
+            position: absolute; bottom: 30px; left: 30px; width: 100px; height: 100px; border-radius: 50%;
+            background: rgba(0, 0, 0, 0.3); border: 2px solid rgba(255,255,255,0.4); pointer-events: none; display: none;
+        }
+        #joystick-knob {
+            position: absolute; top: 25px; left: 25px; width: 50px; height: 50px; border-radius: 50%; background: rgba(255, 255, 255, 0.6);
+        }
+
+        /* Chat Overlay */
+        #chat-box {
+            position: absolute; bottom: 90px; left: 10px; width: 260px; max-height: 140px;
+            background: rgba(0, 0, 0, 0.4); border-radius: 6px; padding: 8px; overflow-y: auto;
+            pointer-events: auto; display: flex; flex-direction: column; gap: 4px;
+        }
+        .chat-msg { color: white; font-size: 11px; text-shadow: 1px 1px 1px #000; word-break: break-word; }
+        #chat-input-container { position: absolute; bottom: 90px; left: 10px; display: none; pointer-events: auto; }
+        #chat-input { width: 200px; padding: 6px; border-radius: 4px; border: none; font-size: 12px; touch-action: auto; -webkit-user-select: auto; user-select: auto; }
+        #chat-toggle { position: absolute; bottom: 235px; left: 10px; width: 40px; height: 30px; border-radius: 6px; font-size: 10px; }
+    </style>
+</head>
+<body>
+    <div id="join-modal">
+        <div class="modal-box">
+            <h2>Voxel Multiplayer</h2>
+            <input type="text" id="player-name-input" placeholder="Enter Your Name" maxlength="15">
+            <button id="btn-start">Play Game</button>
+        </div>
+    </div>
+
+    <div id="crosshair"></div>
+    <div id="ui-layer">
+        <div id="top-bar">Connecting...</div>
+
+        <div id="hotbar">
+            <div class="slot active" id="slot-1" data-type="1">Grass</div>
+            <div class="slot" id="slot-2" data-type="2">Dirt</div>
+            <div class="slot" id="slot-3" data-type="3">Stone</div>
+            <div class="slot" id="slot-4" data-type="4">Wood</div>
+            <div class="slot" id="slot-5" data-type="5">Leaves</div>
+            <div class="slot" id="slot-6" data-type="6">Brick</div>
+        </div>
+
+        <button class="btn" id="chat-toggle">Chat</button>
+        <div id="chat-box"></div>
+        <div id="chat-input-container">
+            <input type="text" id="chat-input" placeholder="Type message & press Enter...">
+        </div>
+        
+        <div class="controls-container">
+            <div id="joystick-zone" style="width: 50vw; height: 50vh; position: absolute; bottom: 0; left: 0; pointer-events: auto;"></div>
+            <div id="look-zone" style="width: 50vw; height: 100vh; position: absolute; top: 0; right: 0; pointer-events: auto;"></div>
+            <div id="joystick-base"><div id="joystick-knob"></div></div>
+            
+            <div style="z-index: 60; pointer-events: none; width: 100%; display: flex; justify-content: flex-end;">
+                <div class="action-group">
+                    <div class="btn" id="btn-break">Break</div>
+                    <div class="btn" id="btn-place">Place</div>
+                    <div class="btn" id="btn-jump">Jump</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script type="importmap">
+        { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        const socket = io();
+        let myId = null;
+        let myName = 'Builder';
+        const playerMeshes = {}; 
+        const statusText = document.getElementById('top-bar');
+        let currentBlockType = 1;
+
+        // --- UI Interactions ---
+        document.getElementById('btn-start').addEventListener('click', () => {
+            const val = document.getElementById('player-name-input').value.trim();
+            if (val) myName = val;
+            document.getElementById('join-modal').style.display = 'none';
+            socket.emit('join', myName);
+        });
+
+        document.querySelectorAll('.slot').forEach(slot => {
+            slot.addEventListener('touchstart', (e) => {
+                e.preventDefault(); e.stopPropagation();
+                document.querySelectorAll('.slot').forEach(s => s.classList.remove('active'));
+                slot.classList.add('active');
+                currentBlockType = parseInt(slot.dataset.type);
+            });
+        });
+
+        // Chat UI toggling
+        const chatBox = document.getElementById('chat-box');
+        const chatToggle = document.getElementById('chat-toggle');
+        const chatInputContainer = document.getElementById('chat-input-container');
+        const chatInput = document.getElementById('chat-input');
+
+        chatToggle.addEventListener('click', () => {
+            if (chatInputContainer.style.display === 'block') {
+                chatInputContainer.style.display = 'none';
+            } else {
+                chatInputContainer.style.display = 'block';
+                chatInput.focus();
+            }
+        });
+
+        chatInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && chatInput.value.trim() !== '') {
+                socket.emit('chatMessage', chatInput.value);
+                chatInput.value = '';
+                chatInputContainer.style.display = 'none';
+            }
+        });
+
+        function addChatMessage(sender, text) {
+            const msgEl = document.createElement('div');
+            msgEl.className = 'chat-msg';
+            msgEl.innerHTML = `<strong>${sender}:</strong> ${text}`;
+            chatBox.appendChild(msgEl);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        // --- Three.js Engine Setup ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87CEEB);
+        scene.fog = new THREE.FogExp2(0x87CEEB, 0.015);
+
+        const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera.rotation.order = 'YXZ'; 
+        
+        const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); 
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        const playerBody = new THREE.Object3D();
+        playerBody.position.set(0, 5, 0);
+        scene.add(playerBody);
+        playerBody.add(camera); 
+
+        // Dynamic Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+        const dirLight = new THREE.DirectionalLight(0xfff5e6, 0.7);
+        scene.add(dirLight);
+
+        // --- Voxel Engine & Materials ---
+        const blockSize = 1;
+        const blocks = new Map();
+        const blockMeshesList = [];
+        const boxGeo = new THREE.BoxGeometry(blockSize, blockSize, blockSize);
+        
+        function generateTexture(type) {
+            const cvs = document.createElement('canvas');
+            cvs.width = 32; cvs.height = 32;
+            const ctx = cvs.getContext('2d');
+            
+            if (type === 1) { // Grass
+                ctx.fillStyle = '#55aa55'; ctx.fillRect(0, 0, 32, 16);
+                ctx.fillStyle = '#8b4513'; ctx.fillRect(0, 16, 32, 16);
+            } else if (type === 2) { // Dirt
+                ctx.fillStyle = '#8b4513'; ctx.fillRect(0, 0, 32, 32);
+                ctx.fillStyle = '#6d350e'; ctx.fillRect(4, 4, 8, 8); ctx.fillRect(20, 18, 6, 6);
+            } else if (type === 3) { // Stone
+                ctx.fillStyle = '#777777'; ctx.fillRect(0, 0, 32, 32);
+                ctx.fillStyle = '#555555'; ctx.fillRect(4, 4, 8, 8); ctx.fillRect(18, 18, 8, 8);
+            } else if (type === 4) { // Wood
+                ctx.fillStyle = '#8B5A2B'; ctx.fillRect(0, 0, 32, 32);
+                ctx.fillStyle = '#5C3317'; ctx.fillRect(6, 0, 4, 32); ctx.fillRect(20, 0, 4, 32);
+            } else if (type === 5) { // Leaves
+                ctx.fillStyle = '#2e8b57'; ctx.fillRect(0, 0, 32, 32);
+                ctx.fillStyle = '#1e5b37'; ctx.fillRect(2, 2, 8, 8); ctx.fillRect(16, 14, 10, 10);
+            } else if (type === 6) { // Brick
+                ctx.fillStyle = '#b22222'; ctx.fillRect(0, 0, 32, 32);
+                ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 15, 32, 2); ctx.fillRect(15, 0, 2, 15); ctx.fillRect(8, 17, 2, 15);
+            }
+            
+            const tex = new THREE.CanvasTexture(cvs);
+            tex.magFilter = THREE.NearestFilter;
+            return new THREE.MeshLambertMaterial({ map: tex });
+        }
+
+        const materials = {
+            1: generateTexture(1), 2: generateTexture(2), 3: generateTexture(3),
+            4: generateTexture(4), 5: generateTexture(5), 6: generateTexture(6)
+        };
+
+        function addBlock(x, y, z, type, emit = true) {
+            const key = `${x},${y},${z}`;
+            if (blocks.has(key)) return;
+            const mesh = new THREE.Mesh(boxGeo, materials[type] || materials[1]);
+            mesh.position.set(x, y, z);
+            scene.add(mesh);
+            blocks.set(key, mesh);
+            blockMeshesList.push(mesh);
+
+            if (emit) socket.emit('updateBlock', { x, y, z, type });
+        }
+
+        function removeBlock(x, y, z, emit = true) {
+            const key = `${x},${y},${z}`;
+            if (blocks.has(key)) {
+                const mesh = blocks.get(key);
+                scene.remove(mesh);
+                blocks.delete(key);
+                const idx = blockMeshesList.indexOf(mesh);
+                if (idx > -1) blockMeshesList.splice(idx, 1);
+                
+                spawnParticles(new THREE.Vector3(x, y, z));
+                if (emit) socket.emit('updateBlock', { x, y, z, type: 0 });
+            }
+        }
+
+        function spawnParticles(pos) {
+            const pGeo = new THREE.BoxGeometry(0.15, 0.15, 0.15);
+            const pMat = new THREE.MeshBasicMaterial({ color: 0x8b4513 });
+            for (let i = 0; i < 6; i++) {
+                const particle = new THREE.Mesh(pGeo, pMat);
+                particle.position.copy(pos).add(new THREE.Vector3((Math.random()-0.5)*0.6, (Math.random()-0.5)*0.6, (Math.random()-0.5)*0.6));
+                scene.add(particle);
+                setTimeout(() => scene.remove(particle), 400);
+            }
+        }
+
+        // --- Raycasting for Action Buttons ---
+        const raycaster = new THREE.Raycaster();
+        const center = new THREE.Vector2(0, 0);
+
+        function interact(action) {
+            raycaster.setFromCamera(center, camera);
+            const intersects = raycaster.intersectObjects(blockMeshesList);
+            if (intersects.length > 0 && intersects[0].distance <= 6) {
+                const intersect = intersects[0];
+                const p = intersect.object.position;
+                
+                if (action === 'break') {
+                    removeBlock(Math.round(p.x), Math.round(p.y), Math.round(p.z));
+                } else if (action === 'place') {
+                    const norm = intersect.face.normal;
+                    const nx = Math.round(p.x + norm.x);
+                    const ny = Math.round(p.y + norm.y);
+                    const nz = Math.round(p.z + norm.z);
+                    addBlock(nx, ny, nz, currentBlockType);
+                }
+            }
+        }
+
+        document.getElementById('btn-break').addEventListener('touchstart', (e) => { e.preventDefault(); interact('break'); });
+        document.getElementById('btn-place').addEventListener('touchstart', (e) => { e.preventDefault(); interact('place'); });
+        document.getElementById('btn-jump').addEventListener('touchstart', (e) => { 
+            e.preventDefault(); if (canJump) { velocity.y = 8.5; canJump = false; } 
+        });
+
+        // --- Touch Input Handling ---
+        const lookZone = document.getElementById('look-zone'), joystickZone = document.getElementById('joystick-zone');
+        const joystickBase = document.getElementById('joystick-base'), joystickKnob = document.getElementById('joystick-knob');
+        let lookTouchId = null, moveTouchId = null;
+        let prevTouchX = 0, prevTouchY = 0, startMoveX = 0, startMoveY = 0, moveX = 0, moveY = 0; 
+
+        lookZone.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            for (let i=0; i<e.changedTouches.length; i++) {
+                if (lookTouchId === null) {
+                    lookTouchId = e.changedTouches[i].identifier;
+                    prevTouchX = e.changedTouches[i].clientX; prevTouchY = e.changedTouches[i].clientY;
+                }
+            }
+        });
+
+        lookZone.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            for (let i=0; i<e.changedTouches.length; i++) {
+                if (e.changedTouches[i].identifier === lookTouchId) {
+                    const touch = e.changedTouches[i];
+                    camera.rotation.y -= (touch.clientX - prevTouchX) * 0.005;
+                    camera.rotation.x -= (touch.clientY - prevTouchY) * 0.005;
+                    camera.rotation.x = Math.max(-Math.PI/2.1, Math.min(Math.PI/2.1, camera.rotation.x));
+                    prevTouchX = touch.clientX; prevTouchY = touch.clientY;
+                }
+            }
+        });
+
+        const resetLook = (e) => {
+            for (let i=0; i<e.changedTouches.length; i++) if (e.changedTouches[i].identifier === lookTouchId) lookTouchId = null;
+        };
+        lookZone.addEventListener('touchend', resetLook); lookZone.addEventListener('touchcancel', resetLook);
+
+        joystickZone.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            for (let i=0; i<e.changedTouches.length; i++) {
+                if (moveTouchId === null) {
+                    moveTouchId = e.changedTouches[i].identifier;
+                    startMoveX = e.changedTouches[i].clientX; startMoveY = e.changedTouches[i].clientY;
+                    joystickBase.style.display = 'block';
+                    joystickBase.style.left = (startMoveX - 50) + 'px'; joystickBase.style.top = (startMoveY - 50) + 'px';
+                }
+            }
+        });
+
+        joystickZone.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            for (let i=0; i<e.changedTouches.length; i++) {
+                if (e.changedTouches[i].identifier === moveTouchId) {
+                    const touch = e.changedTouches[i];
+                    const dx = touch.clientX - startMoveX, dy = touch.clientY - startMoveY;
+                    const distance = Math.min(50, Math.sqrt(dx*dx + dy*dy));
+                    const angle = Math.atan2(dy, dx);
+                    joystickKnob.style.transform = `translate(${Math.cos(angle)*distance}px, ${Math.sin(angle)*distance}px)`;
+                    moveX = (Math.cos(angle)*distance) / 50; moveY = (Math.sin(angle)*distance) / 50; 
+                }
+            }
+        });
+
+        const resetJoystick = (e) => {
+            for (let i=0; i<e.changedTouches.length; i++) {
+                if (e.changedTouches[i].identifier === moveTouchId) {
+                    moveTouchId = null; moveX = 0; moveY = 0;
+                    joystickBase.style.display = 'none'; joystickKnob.style.transform = `translate(0px, 0px)`;
+                }
+            }
+        };
+        joystickZone.addEventListener('touchend', resetJoystick); joystickZone.addEventListener('touchcancel', resetJoystick);
+
+        // --- Floating Canvas Text (3D Name Tag Generator) ---
+        function createNameTag(text) {
+            const cvs = document.createElement('canvas');
+            cvs.width = 256; cvs.height = 64;
+            const ctx = cvs.getContext('2d');
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+            ctx.fillRect(0, 0, 256, 64);
+            ctx.font = 'Bold 28px sans-serif';
+            ctx.fillStyle = '#ffffff';
+            ctx.textAlign = 'center';
+            ctx.fillText(text, 128, 42);
+            
+            const tex = new THREE.CanvasTexture(cvs);
+            const mat = new THREE.SpriteMaterial({ map: tex });
+            const sprite = new THREE.Sprite(mat);
+            sprite.scale.set(1.8, 0.45, 1);
+            sprite.position.y = 2.1;
+            return sprite;
+        }
+
+        // --- Player Spawn & Character Mesh ---
+        function spawnPlayer(id, state) {
+            const group = new THREE.Group();
+            
+            const matSkin = new THREE.MeshLambertMaterial({ color: state.colors.skin });
+            const matShirt = new THREE.MeshLambertMaterial({ color: state.colors.shirt });
+            const matPants = new THREE.MeshLambertMaterial({ color: state.colors.pants });
+
+            // Head
+            const head = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), matSkin);
+            head.position.y = 1.55; group.add(head);
+
+            // Body
+            const body = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.6, 0.25), matShirt);
+            body.position.y = 1.0; group.add(body);
+
+            // Arms
+            const armGeo = new THREE.BoxGeometry(0.22, 0.6, 0.22);
+            armGeo.translate(0, -0.25, 0); 
+            const armL = new THREE.Mesh(armGeo, matSkin); armL.position.set(0.38, 1.3, 0);
+            const armR = new THREE.Mesh(armGeo, matSkin); armR.position.set(-0.38, 1.3, 0);
+            group.add(armL); group.add(armR);
+
+            // Legs
+            const legGeo = new THREE.BoxGeometry(0.22, 0.65, 0.22);
+            legGeo.translate(0, -0.3, 0);
+            const legL = new THREE.Mesh(legGeo, matPants); legL.position.set(0.14, 0.65, 0);
+            const legR = new THREE.Mesh(legGeo, matPants); legR.position.set(-0.14, 0.65, 0);
+            group.add(legL); group.add(legR);
+
+            // Floating Name tag
+            const nameTag = createNameTag(state.name || 'Player');
+            group.add(nameTag);
+
+            group.position.set(state.x, state.y, state.z);
+            scene.add(group);
+
+            playerMeshes[id] = { 
+                group, armL, armR, legL, legR, walkCycle: 0, 
+                targetPos: new THREE.Vector3(state.x, state.y, state.z), 
+                targetRot: state.ry 
+            };
+        }
+
+        // --- Networking Events ---
+        socket.on('init', (data) => {
+            myId = data.id;
+            statusText.innerText = `Online - Players: ${Object.keys(data.players).length}`;
+            
+            Object.keys(data.worldBlocks).forEach(key => {
+                const [x, y, z] = key.split(',').map(Number);
+                if (data.worldBlocks[key] !== 0) addBlock(x, y, z, data.worldBlocks[key], false);
+            });
+
+            Object.keys(data.players).forEach(id => {
+                if (id !== myId) spawnPlayer(id, data.players[id]);
+            });
+        });
+
+        socket.on('playerJoin', (data) => {
+            spawnPlayer(data.id, data.player);
+            statusText.innerText = `Online - Players: ${Object.keys(playerMeshes).length + 1}`;
+        });
+        
+        socket.on('playerMove', (data) => {
+            if (playerMeshes[data.id]) {
+                playerMeshes[data.id].targetPos.set(data.x, data.y, data.z);
+                playerMeshes[data.id].targetRot = data.ry;
+            }
+        });
+
+        socket.on('playerLeave', (id) => {
+            if (playerMeshes[id]) {
+                scene.remove(playerMeshes[id].group);
+                delete playerMeshes[id];
+                statusText.innerText = `Online - Players: ${Object.keys(playerMeshes).length + 1}`;
+            }
+        });
+
+        socket.on('blockUpdate', (data) => {
+            if (data.type !== 0) addBlock(data.x, data.y, data.z, data.type, false);
+            else removeBlock(data.x, data.y, data.z, false);
+        });
+
+        socket.on('chatMessage', (data) => {
+            addChatMessage(data.sender, data.text);
+        });
+
+        // --- Voxel Collision & Physics System ---
+        const velocity = new THREE.Vector3();
+        const direction = new THREE.Vector3();
+        let canJump = false, prevTime = performance.now(), lastSendTime = 0;
+
+        function checkVoxelCollision(px, py, pz) {
+            // Checks bounding area surrounding player
+            const radius = 0.3;
+            const minX = Math.floor(px - radius), maxX = Math.floor(px + radius);
+            const minY = Math.floor(py), maxY = Math.floor(py + 1.75);
+            const minZ = Math.floor(pz - radius), maxZ = Math.floor(pz + radius);
+
+            for (let x = minX; x <= maxX; x++) {
+                for (let y = minY; y <= maxY; y++) {
+                    for (let z = minZ; z <= maxZ; z++) {
+                        if (blocks.has(`${x},${y},${z}`)) return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const time = performance.now();
+            const delta = Math.min((time - prevTime) / 1000, 0.1); 
+
+            // Physics damping & gravity
+            velocity.x -= velocity.x * 10.0 * delta;
+            velocity.z -= velocity.z * 10.0 * delta;
+            velocity.y -= 25.0 * delta; 
+
+            direction.set(moveX, 0, moveY);
+            direction.applyEuler(new THREE.Euler(0, camera.rotation.y, 0));
+            direction.normalize();
+
+            const speed = 20.0; 
+            if (moveX !== 0 || moveY !== 0) {
+                velocity.x += direction.x * speed * delta;
+                velocity.z += direction.z * speed * delta;
+            }
+
+            // X Movement with Collision Check
+            const nextX = playerBody.position.x + velocity.x * delta;
+            if (!checkVoxelCollision(nextX, playerBody.position.y - 1.6, playerBody.position.z)) {
+                playerBody.position.x = nextX;
+            } else { velocity.x = 0; }
+
+            // Z Movement with Collision Check
+            const nextZ = playerBody.position.z + velocity.z * delta;
+            if (!checkVoxelCollision(playerBody.position.x, playerBody.position.y - 1.6, nextZ)) {
+                playerBody.position.z = nextZ;
+            } else { velocity.z = 0; }
+
+            // Y Movement with Ground Collision Check
+            const nextY = playerBody.position.y + velocity.y * delta;
+            if (velocity.y < 0 && checkVoxelCollision(playerBody.position.x, nextY - 1.65, playerBody.position.z)) {
+                velocity.y = 0;
+                canJump = true;
+            } else if (velocity.y > 0 && checkVoxelCollision(playerBody.position.x, nextY, playerBody.position.z)) {
+                velocity.y = 0;
+            } else {
+                playerBody.position.y = nextY;
+            }
+
+            // Void Boundary Check
+            if (playerBody.position.y < -20) {
+                playerBody.position.set(0, 8, 0);
+                velocity.set(0, 0, 0);
+            }
+
+            // Send local position update tick
+            if (time - lastSendTime > 50 && myId) {
+                socket.emit('move', { x: playerBody.position.x, y: playerBody.position.y - 1.0, z: playerBody.position.z, ry: camera.rotation.y });
+                lastSendTime = time;
+            }
+
+            // Remote Player Interpolation & Walk Animations
+            Object.values(playerMeshes).forEach(p => {
+                if (p.targetPos) {
+                    const distMoved = p.group.position.distanceTo(p.targetPos);
+                    p.group.position.lerp(p.targetPos, 0.25);
+                    
+                    const diff = p.targetRot - p.group.rotation.y;
+                    p.group.rotation.y += Math.atan2(Math.sin(diff), Math.cos(diff)) * 0.25;
+
+                    if (distMoved > 0.02) {
+                        p.walkCycle += distMoved * 5.0;
+                        const swing = Math.sin(p.walkCycle) * 1.0;
+                        p.armL.rotation.x = swing; p.armR.rotation.x = -swing;
+                        p.legL.rotation.x = -swing; p.legR.rotation.x = swing;
+                    } else {
+                        p.armL.rotation.x *= 0.8; p.armR.rotation.x *= 0.8;
+                        p.legL.rotation.x *= 0.8; p.legR.rotation.x *= 0.8;
+                    }
+                }
+            });
+
+            // Sky & Day/Night Transition
+            const timeOfDay = (time / 20000) % (Math.PI * 2);
+            const sunLight = Math.max(0.15, Math.sin(timeOfDay));
+            scene.background.setHSL(0.55, 0.4, sunLight * 0.5 + 0.1);
+            scene.fog.color.copy(scene.background);
+            dirLight.intensity = sunLight * 0.8;
+            dirLight.position.set(Math.cos(timeOfDay) * 50, Math.sin(timeOfDay) * 50, 20);
+
+            renderer.render(scene, camera);
+            prevTime = time;
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+    </script>
+</body>
+              </html>
